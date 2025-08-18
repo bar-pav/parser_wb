@@ -15,6 +15,7 @@ preset_url = "https://catalog.wb.ru/catalog/promo/bucket_28/v8/filters?ab_testin
 result_ = {}
 current_root = None
 queue_for_task = []
+tasks = []
 
 
 def save(data):
@@ -55,7 +56,6 @@ async def fetch(url, session, results, parent_category):
         print(f'Error in ({url}):', e)
 
 
-tasks = []
 
 async def get_subcategories(queue_for_task=None):
     '''Создает сессию и запускает асинхронно запросы'''
@@ -84,13 +84,13 @@ async def get_subcategories(queue_for_task=None):
 
 
 
-def add_to_task(subcategory):
-    queue_for_task.append(subcategory)
+#def add_to_task(subcategory):
+#    queue_for_task.append(subcategory)
 
 
 def cat(categories, level, result):
-    """Проходит по категориям и присваивает уровни влоденности.
-        Также передаем элеиенты в очередь для запроса подкатегорий
+    """Проходит по категориям и присваивает уровни вложенности.
+        Также передаем элементы в очередь для запроса подкатегорий
     """
     level = level + 1
     global current_root
@@ -106,7 +106,8 @@ def cat(categories, level, result):
             cat(category['childs'], level, result)
         else:
             category['root_id'] = current_root['id']
-            add_to_task(category)
+            #add_to_task(category)
+            queue_for_task.append(category)
 
 
 
@@ -142,7 +143,7 @@ async def main():
                            # if category['name'] in local_categories[0].split()
                            # # and not category.get('dynamic', False)
                            #   and category['name'] != 'Wibes'
-                             ]
+                             ] # Список категорий, которые будут использоваться для названий листов в xlsx файле.
     cat(main_categories, 0, result_)
     subcategories = await get_subcategories(queue_for_task)
     for key, val in subcategories.items():
