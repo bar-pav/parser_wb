@@ -9,38 +9,42 @@ from openpyxl import Workbook
 from playwright.async_api import async_playwright, expect
 
 
+# TODO: при запросе подкатегорий может оказаться, что в ответе нет поля 'data'. нужно повторить запрос на другой адрес в переменной second_preset_url.
+# TODO: в результирующем файле excel будут повторяться подкатегории с вложенностью 99. Добавить проверку на наличие категории в результирующем списке.
+
 site = "https://www.wildberries.ru/"
 search_url = "https://search.wb.ru/exactmatch/sng/common/v18/search?ab_testing=false&appType=1&curr=rub&dest=-59202&filters=ffsubject&lang=ru&%s&resultset=filters&spp=30&suppressSpellcheck=false"
 preset_url = "https://catalog.wb.ru/catalog/promo/bucket_28/v8/filters?ab_testing=false&appType=1&curr=rub&dest=-59252&lang=ru&%s&spp=30"
+second_preset_url = "https://search.wb.ru/exactmatch/sng/common/v18/search?ab_testing=false&appType=1&autoselectFilters=false&curr=rub&dest=-59202&inheritFilters=false&lang=ru&%s&resultset=filters&spp=30&suppressSpellcheck=false"
+categories_url = "https://static-basket-01.wbbasket.ru/vol0/data/main-menu-by-ru-v3.json"
 result_ = {}
 current_root = None
 queue_for_task = []
 tasks = []
 
 
+
 def save(data):
     wb =Workbook()
-
     header = ['ID', 'Name', 'Level']
-
     for key, values in data.items():
         sheet = wb.create_sheet(values[0]['name'])
         wb.active = sheet
         sheet.append(header)
         for v in values:
             sheet.append([v['id'], v['name'], v['level']])
-
     wb.remove(wb['Sheet'])
     try:
         wb.save('result.xlsx')
     except:
         now = datetime.datetime.now()
-        wb.save(f'result{now.strftime('%H%M%d%m%y.xlsx')}')
+        wb.save(f"result{now.strftime('%H%M%d%m%y.xlsx')}")
 
 
 async def fetch(url, session, results, parent_category):
-    try:
-        async with session.get(url) as response:
+
+    async with session.get(url) as response:
+        try:
             categories_json = json.loads(await response.text())
             results[parent_category['root_id']] = results.get(parent_category['root_id'], [])
             if categories_json['data']['filters'][0]['name'] == 'Категория':
@@ -52,9 +56,8 @@ async def fetch(url, session, results, parent_category):
                         for i in item['items']:
                             results[parent_category['root_id']].append(
                                 {'id': i['id'], 'name': i['name'], 'level': 99})
-    except Exception as e:
-        print(f'Error in ({url}):', e)
-
+        except Exception as e:
+            print(f'Error in ({url}):', e)
 
 
 async def get_subcategories(queue_for_task=None):
@@ -75,17 +78,11 @@ async def get_subcategories(queue_for_task=None):
                         url = preset_url % param
                     else: continue
                 task = asyncio.create_task(fetch(url, session, results, i))
-                tasks.append(task)
+                tasks.append(task)  
             except Exception as e:
                 print('Error:', i, e)
-
         await asyncio.gather(*tasks)
     return results
-
-
-
-#def add_to_task(subcategory):
-#    queue_for_task.append(subcategory)
 
 
 def cat(categories, level, result):
@@ -94,9 +91,7 @@ def cat(categories, level, result):
     """
     level = level + 1
     global current_root
-    # print(result)
     for category in categories:
-        print('::', category['id'])
         if level == 1:
             current_root = category
         result[current_root['id']] = result.get(current_root['id'], [])
@@ -106,50 +101,23 @@ def cat(categories, level, result):
             cat(category['childs'], level, result)
         else:
             category['root_id'] = current_root['id']
-            #add_to_task(category)
             queue_for_task.append(category)
 
 
-
 async def get_all_categories_from_wb(url):
-    """Данная функция при загрузке сайте получает json файл со списком категорий."""
-    async with async_playwright() as pw:
-        browser = await pw.chromium.launch(
-            headless=False,
-            args=[
-                '--disable-blink-features=AutomationControlled',
-                '--start-maximized',
-            ],
-        )
-        context = await browser.new_context(
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36',
-            java_script_enabled=True
-        )
-        page = await context.new_page()
-        await page.goto(url)
-        async with page.expect_response('**/main-menu-by-ru-v3.json') as res:
-            response_text =  await res.value
-            all_categories = await response_text.json()
-        await page.wait_for_timeout(3000)
-        # local_categories зависят от местоположения. На данный момент не используются в дальнейшем
-        local_categories = await page.locator('ul.menu-burger__main-list',).all_inner_texts()
-        return all_categories, local_categories
+        async with aiohttp.ClientSession() as session:
+            async with session.get(categories_url) as response:
+                all_categories = await response.json()
+        return all_categories
 
 
 
 async def main():
-    (all_categories, local_categories) = await get_all_categories_from_wb(site)
-    main_categories = [category for category in all_categories
-                           # if category['name'] in local_categories[0].split()
-                           # # and not category.get('dynamic', False)
-                           #   and category['name'] != 'Wibes'
-                             ] # Список категорий, которые будут использоваться для названий листов в xlsx файле.
-    cat(main_categories, 0, result_)
+    all_categories = await get_all_categories_from_wb(site)
+    cat(all_categories, 0, result_)
     subcategories = await get_subcategories(queue_for_task)
     for key, val in subcategories.items():
         for i in val:
             result_[key].append(i)
     save(result_)
-
-
 asyncio.run(main())
